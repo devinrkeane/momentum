@@ -1,0 +1,207 @@
+---
+title: Statistical Properties of Risk Factor and Sigma401k's Dynamic Asset Allocation Returns
+author: "Devin Keane"
+date: "July 2017"
+output:
+  pdf_document: default
+  html_document:
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+``` 
+
+## Introduction
+
+Momentum is an empirical observation that tradeable assets that have outperformed a peer group over intermediate periods (i.e. the previous 2-12 months) tend to continue to outperform over the near to intermediate term (3-12 months).
+
+Sigma401k has integrated a relatively simplified version of momentum, using major asset classes, in combination with a risk managment tool of market moving averages we call the trend indicator. The result is what is known as dynamic asset allocation (DAA): risk factor exposure with downside risk management.  The goal is to provide maximum acceptable exposure to equities during positive market trends, and attempt to mitigate market risk. We provide several dynamically managed portfolios according to risk tolerance (Aggressive to Conservative).  The construction of portfolios using trend and asset class selection is presented in detail in two white papers, available at [sigma401k.com](www.sigma401k.com/research).
+
+The goal of this brief paper is to highlight in more detail the statistical properties of returns for the well known risk factors (market, value, size, momentum) and size them up against one of Sigma401k's Aggressive portfolio returns. We break down performance of the DAA portfolio into its two principle components (trend and asset class momentum) in addition to the full strategy.  In our hypothetical testing between 1998-2016, the DAA portfolios exhibit lower variance, as well as other moments (skew, kurtosis) that more closely resemble normally distributed returns.  In addition, we find relatively lower serial correlation in absolute monthly returns for DAA vs. the pure factors.
+```{r error=FALSE, message=FALSE, warning=FALSE, echo=FALSE}
+library(readr);library(quantmod);library(PerformanceAnalytics);library(RColorBrewer);
+library(xlsx);library(ggplot2);library(forecast)
+library(dplyr);library(purrr);library(texreg);library(astsa);library(timeSeries);
+library(tseries);library(tidyr);library(scales)
+```
+### Bringing in and tidying the data
+Dartmouth professor Ken French maintains a [comprehensive data set](http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html) that provides compiled monthly factor return data and numerous constructed portfolios of factor combinations, including momentum, size, and value.  We use monthly return data between 1927-2016 from the . A complete description of how the factor portfolios relevant to this discussion are constructed is available in our momentum white paper. Descriptions of all portfolios are available at professor French's website. The particular datasets used in this analysis are linked below [^1]
+
+[^1]:Data Sets used: http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Portfolios_Formed_on_ME_CSV.zip\n http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Portfolios_Formed_on_BE-ME_CSV.zip\n
+http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/10_Portfolios_Prior_12_2_CSV.zip\n
+
+
+To generate Sigma401k's DAA portfolio, we use Dow Jones Indexes that track 17 common asset classes.  Monthly data are available from 1998 to 2016. Asset weightings are held quarerly and returns are calculated using our fundsorting algorithm in R, which is guided by previous 2-12 month asset class momentum. Past 2-12 month performance is exponentially weighted as follows:
+$$ weighted\_return = 0.4*prior_2month + 0.3*prior_{2-4}month + 0.2*prior_{2-6}month + 0.1*prior_{2-12}month $$
+The weighted returns and are compared relative to the broad market benchmark (Russell 3000).  Asset classes that outperform the Russell 3000 are used for new positions each quarter. We discuss portfolio construction in more detail in our other white papers [here](www.sigma401k.com/research/trend_indicator.pdf) and [Sigma401k Momentum](www.sigma401k.com/research/momentum.pdf) (DAA Momentum)
+
+
+```{r echo = FALSE, fig.height = 4, fig.width = 5, fig.align = "center"}
+
+
+factor.returns <- as.xts(read.zoo("data/MoM_Value_Size_monthly_returns_reduced.csv", header=TRUE,
+                                  index.column=1, sep=",", format = "%m/%d/%Y"))
+
+#monthly factor returns, 1927-2016
+factor.returns.df <- as_data_frame(factor.returns[,c(2,5,6,14)]) %>% 
+        mutate(date = index(factor.returns)) %>% 
+        gather(factor, return, -date)
+
+#annualized parameters from the Performance Analytics package
+returns.table <- table.AnnualizedReturns(factor.returns[,c(2,5,6,14)])
+returns.table2 <- as_data_frame(t(returns.table), factor = rownames(returns.table))
+returns.table2$Factor <- names(returns.table)
+returns.table.tidy <- gather(returns.table2, variable, value, -Factor)
+```
+
+### Annualized values for the following parameters are shown in figure 1 below:
+
+* **Total Return**: mean geometric return, based on monthly log returns
+
+* **Standard Deviation**: how widely distributed log returns are about their mean
+
+* **Sharpe Ratio**: annualized return divided by standard deviation
+
+```{r echo=FALSE, fig.height = 3.5, fig.width = 5, fig.align = "center"}
+
+
+
+ggplot(returns.table.tidy, aes(x=1:12, y= value, fill=factor(Factor))) + 
+        geom_col(position = "dodge", alpha = 0.3, width =  .5) + 
+        facet_wrap(~variable, nrow = 3, scales = "free") +
+        scale_fill_manual(name = "Factor",
+                          values = c("black", "red", "blue", "green"),
+                          labels = c("Market", "Size", "Value", "Momentum")) +
+        scale_x_continuous(labels = NULL) +
+        scale_y_continuous(labels = scales::percent) +
+        theme_minimal()+
+        theme(legend.position = "top")
+```
+***
+```{r warning=FALSE, message=FALSE, error=FALSE, echo=FALSE, fig.height= 3.5, fig.width = 5, fig.align = "center"}
+
+### Smoothed density distributions of monthly returns for pure factors
+
+ggplot(factor.returns.df, aes(x=return, fill=factor(factor))) + 
+        geom_density(alpha = 0.3, aes(y=..scaled..)) + 
+        facet_grid(factor~.) +
+        scale_fill_manual(name = "Factor",
+                          values = c("black", "red", "blue", "green"),
+                          labels = "none")  +
+        scale_x_continuous(limits = c(-0.3, 0.3)) +
+        guides(scale=NULL) +
+        theme_minimal() +
+        theme(legend.position = "top")
+```
+###Statistical Tests
+
+It is apparent that in comparing "pure" factor returns that momentum holds a sizeable advantage throughout the period. The momentum factor returns, on an absolute and risk adjusted basis, are empirically larger than other commonly targeted risk factors - size, value and the market. This is a well known and documented observation in financial literature so we will not belabor the point here. Moreover, our DAA Momentum paper describes the momentum effect and hypothetical returns between the four risk factors and a comprable Sigma401k portfolio model.  We touch on these areas briefly here for context, but go beyond the general peformance measures. The purpose of this paper is to determine if the DAA momentum, trend and trend-momentum series are abnormally different from the major factor return series. While hypothetical DAA returns have been higher with lower variance, it is also important to know if there were concerning values regarding return characteristics.  These include as higher negative skewness, highly non-normal returns distributions,  or relatively high serial correlation. Abnormally high values relative to the other factors could call into question the underlying value Sigma401k's DAA portfolio is designed to provide.  To compare these factor series to our DAA portfolio, using the following variants:
+
+* *Asset Class Selection only* (DAA MoM): with no trend/risk managment component, this portfolio uses only the asset class momentum rankings from quarter to quarter to generate monthly portfolio returns. In other words, this is the asset class momentum component of DAA. Rankings are based off past 2-12 month total return relative to the Russell 3000 index. 
+
+* *Trend Only* (Trend): To calculate returns for DAA trend only, we use Dow Jones Indexes for Large Cap Blend (WNVR) and intermediate term bond (BFQR).  This is meant to isolate the effects of a trend-based portfolio without the effects of asset class selection. 
+
+* *Trend with Asset Class Selection* (Trend-MoM): this our baseline DAA Aggressive portfolio, combining trend and asset class selection with 90/10 equity/fixed income in positive trends and 30/70 proportion in negative trends.
+
+Sigma401k's particular application of momentum in our DAA portfolio uses relative performance with asset classes in a long-only format. This differs from the large universe of stocks used for the "pure" Fama-French momentum portfolios, which in practice is not applicable, particularly so in 401(k) plans where investment options are generally limited to mutual funds and ETFs. 
+
+We brefiely examine the statistical properties of monthly returns for the seven portfolios below. First, the moments of each series are summarized in Table 1. Plotting monthly returns for each series shows visually how volatility varies between the DAA portfolio and factor returns. Values for distribution moments are summarized in the table below.  While series appear normally distributed, it's useful to measure more precisely with statistical tests to determine how normal (or non normal) they are. The Shapiro-Wilk test of normality in data serves this purpose. The test statistic generated by the test fits a chi-squared distribution with $n_{obs} - 1$ degrees of freedom (in this case, $n = 228$ months).   
+
+The null hypothesis of normality in monthly returns for the sample period (1998-2016) is rejected in all portfolios, as shown in the Table 1 below. To pass the normality test, the null hypothesis would fail to reject *(p > 0.05)*. It is important to note that failing to reject the null does not mean a distribution is normal per se; rather we assume the data are normal and we cannot say that the sample is not normal.  We also tested for normality in returns between 2007-2016, also shown in table 2. Interestingly, the trend only and trend-momentum series failed to reject the null of normality. In other words, for this ten year period, there were no significant numbers of extreme return months skewing the data, or excessive clustering of returns (autocorrelation). 
+
+```{r, echo = FALSE, fig.align="center", fig.width=7, fig.height=5.5}
+windowsFonts(a = windowsFont(family = "Arial"))
+sigma_factor_returns <- xts(read.zoo("data/sigma_factor_returns.csv", 
+                        index.column = 1, 
+                        format = "%m/%d/%Y", 
+                        header = TRUE, 
+                        sep = ","))
+
+all_plot <- autoplot(sigma_factor_returns, main = "Monthly Returns, 1998-2016", xlab = "Year") + theme_minimal()
+series_names <- c("DAA MoM", "Trend", 
+                  "Trend-MoM", "FF MoM", "FF Value", "FF Size", "FF Market")
+all_plot$data$Series <- series_names
+all_plot
+```
+
+
+```{r, echo = FALSE, fig.align="center", fig.width=6, fig.height=5.5}
+
+moments_table <- table.Distributions(sigma_factor_returns)
+colnames(moments_table) <- series_names
+
+knitr::kable(moments_table, 
+             caption = "Distribution Moments for Factor and DAA Returns", digits = 3)
+shapiro_tests <- list(
+        normal_test_stat <- apply(sigma_factor_returns, 2, function(x) shapiro.test(x)[[1]]),
+        normal_test_pvalue <- apply(sigma_factor_returns, 2, function(x) shapiro.test(x)[[2]]),
+        test_stat2 <- apply(sigma_factor_returns["2007/2016"], 2, function(x) shapiro.test(x)[[1]]),
+        test_pvalue2 <-  apply(sigma_factor_returns["2007/2016"], 2, function(x) shapiro.test(x)[[2]])
+       )
+normal_table <- lapply(shapiro_tests, function(x) round(as.matrix(x), 4) %>% as.data.frame) %>% bind_cols(.)
+rownames(normal_table) <- series_names
+colnames(normal_table) <- c("1998-2016 Test-Stat", "p-value", "2007-2016 Test-stat", "p-value")
+knitr::kable(normal_table, caption = "Shapiro-Wilk normality test statistics and p-values, 1998-2016", digits = 3)
+```
+
+Because Shapiro tests can be biased to reject the null with larger samples, a Quantile-Quantile plot can be used to visually aid the test of normality.  Below are Q-Q plots  
+
+
+Next, to determine if past return values provide some information on future return values, the seven series are checked for serial correlation. Serial correlation is very common in financial returns, and more so as data intervals become shorter (i.e. monthly to daily). Here, we examine 1-, 12-, and 24- month lagged autocorrelations. An autocorrelation plot of the complete DAA portfolio (asset class momentum and trend) and four risk factors is shown below, followed by a table of all 7 series Ljung-Box test statistics for each lag interval.  We use absolute return values because we are interested in the relationship of the magnitude of lagged returns. During volatile periods, we want to know how significantly do large returns and large losses correlate for each series?
+
+From the plot, it appears that most series exhibit some degree of correlated lags between 1-8 months, however the 1-month lag auto correlations are insignificant for 5 of 7 series, the exceptions being market *(p = 0.004)* and value *(p < 0.000)*.  Beyond 5-months, all series reject the null hypothesis of independence in lagged returns *(p < 0.05)*.
+
+```{r, echo=FALSE, fig.align="center", fig.width=6, fig.height=5}
+
+colors <- c("red", "orange", "green", "black", "purple")
+
+acf_plot <- function(data, lags){
+        #windowsFonts(a = windowsFont(family = font.family))
+        x <- apply(abs(data), 2, Acf, lag.max = lags, plot = FALSE)
+        plot(x[[3]][1:lags], type="l", lty = 1, lwd = 2, 
+        col = "red", max.mfrow=1, ylim=c(-.2,.4), 
+        main = "Lagged Autocorrelations, Absolute Monthly Returns")
+
+#apply(x, 2, function(i=2) lines(x[[i]][1:24]$acf[, 1, 1], lty = i, col = colors[i], lwd = 3))
+
+        lines(x[[4]][1:lags]$acf[, 1,1], lty=1, col="orange", lwd=1)
+        lines(x[[5]][1:lags]$acf[, 1,1], lty=1, col="green", lwd=1)
+        lines(x[[6]][1:lags]$acf[, 1,1], lty=1, col="black", lwd=1)
+        lines(x[[7]][1:lags]$acf[, 1,1], lty=1, col="purple", lwd=1)
+
+        graphics::legend(x= max(x$asset_class_selection$lag)-.25*max(x$asset_class_selection$lag), 
+                         y = 0.4, 
+                         legend = series_names[3:7],
+                         lty = c(1), border = NULL,
+                         col = colors, 
+                         lwd = 2, 
+                         cex = 0.75)
+}
+
+
+acf_plot(sigma_factor_returns, lags = 24)
+
+tests <- list(
+        ljung_box_1 <- apply(abs(sigma_factor_returns), 2, function(x) Box.test(x, lag = 1, type = "Ljung-Box")[[3]]),
+        ljung_box_12 <- apply(abs(sigma_factor_returns), 2, function(x) Box.test(x, lag = 12, type = "Ljung-Box")[[3]]),
+        ljung_box_24 <- apply(abs(sigma_factor_returns), 2, function(x) Box.test(x, lag = 24, "Ljung-Box")[[3]]))
+
+ljung_table <- lapply(tests, function(x) round(as.matrix(x), 4) %>% as.data.frame) %>% bind_cols(.)
+row.names(ljung_table) <- series_names
+colnames(ljung_table) = c("1 lag p-value", "12 lag p-value", "24-month lag p-value")
+knitr::kable(ljung_table, caption = "Ljung-Box test statistics and p-values for monthly returns", digits = 3)
+
+```
+
+##Conclusion
+
+This paper briefly illustrates that momentum factor returns, on an absolute and risk adjusted basis, are empirically larger than other major factors such as size, value and the market. This is a well known and documented empirical fact, covered extensively in financial literature. In addition to summarizing historical returns, we examine how the distribution of returns in our Aggressive DAA portfolio stacks up against the factor returns based on data between 1998-2016.  We find that DAA returns exhibit lower variance and skewness for the component and combined DAA series. Kurtosis values are mixed, with higher and lower values relative to the other factors. Moreover tests for normality in returns and autocorrelation in absolute returns show DAA portfolios with more normal data and less correlated lagged returns.  In particular, we see that tests for normality and serial indepenence are not rejected in the 2007-2016 period for DAA portoflios, but are rejected for the factor returns. This suggests more stable and less  This can be attributed to the shifting of portfolio weights between equities and fixed income. The negative correlation between stocks and bonds will generally reduce overall correlation in portfolio for a given interval.  DAA portfolios attempt to take advantage of this relationship without sacrificing excess returns from equities.
+
+
+
+
+
+
+
+
